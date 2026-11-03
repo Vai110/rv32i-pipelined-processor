@@ -1,0 +1,19 @@
+# Simulation outputs
+*.vvp
+*.vcd
+
+# Log files
+*.log
+
+# Temporary files
+*.tmp
+*.bak
+
+# Generated synthesis outputs
+synthesis/reports/*
+!synthesis/reports/.gitkeep
+
+# Editor and operating system files
+.vscode/
+.DS_Store
+Thumbs.db
