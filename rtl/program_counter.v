@@ -3,6 +3,7 @@ module program_counter (
 
     input wire clk,
     input wire reset,
+    input wire enable,
 
     input wire [31:0] next_pc,
 
@@ -10,18 +11,18 @@ module program_counter (
 
 );
 
-    // Update the Program Counter on the rising edge
+    // Update the PC only when enabled
     always @(posedge clk) begin
 
-        // Synchronous active-high reset
         if (reset) begin
             pc <= 32'b0;
         end
 
-        // Load the next instruction address
-        else begin
+        else if (enable) begin
             pc <= next_pc;
         end
+
+        // Otherwise, retain the current PC
 
     end
 
