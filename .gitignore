@@ -1,8 +1,9 @@
+
 # Simulation outputs
+simulation/build/
+simulation/waveforms/
 *.vvp
 *.vcd
-
-# Log files
 *.log
 
 # Temporary files
