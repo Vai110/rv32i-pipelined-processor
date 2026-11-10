@@ -31,25 +31,30 @@ module tb_rv32i_top;
         forever #5 clk = ~clk;
     end
 
-    // Monitor branch and pipeline control
+    // Monitor jump and redirect signals
     always @(negedge clk) begin
         if (!reset) begin
 
             $display(
-                "PC=%h IFID=%h ID_EX_PC=%h BRANCH=%b TAKEN=%b REDIRECT=%b WB_EN=%b",
+                "PC=%h ID_EX_PC=%h JUMP=%b JALR=%b REDIRECT=%b WB_EN=%b WB_RD=%0d WB_DATA=%h",
                 dut.pc,
-                dut.if_id_instruction,
                 dut.id_ex_pc,
-                dut.id_ex_branch,
-                dut.branch_taken,
+                dut.id_ex_jump,
+                dut.id_ex_jalr,
                 dut.redirect,
-                wb_reg_write
+                wb_reg_write,
+                wb_rd,
+                wb_data
             );
 
             if (dut.redirect === 1'b1) begin
                 redirect_count = redirect_count + 1;
-                $display("BRANCH REDIRECT DETECTED: %0d",
-                         redirect_count);
+
+                $display(
+                    "JUMP REDIRECT DETECTED: %0d TARGET=%h",
+                    redirect_count,
+                    dut.redirect_target
+                );
             end
         end
     end
@@ -70,37 +75,48 @@ module tb_rv32i_top;
 
             case (wb_rd)
 
-                5'd1: begin
-                    if (wb_data !== 32'd5) begin
-                        $display("ERROR: x1 expected 5");
+                5'd4: begin
+                    if (wb_data !== 32'd25) begin
+                        $display("ERROR: Expected x4 = 25");
+                        errors = errors + 1;
+                    end
+                end
+
+                5'd5: begin
+                    if (wb_data !== 32'd8) begin
+                        $display("ERROR: JAL link address should be 8");
                         errors = errors + 1;
                     end
                 end
 
                 5'd2: begin
-                    if (wb_data !== 32'd5) begin
-                        $display("ERROR: x2 expected 5");
-                        errors = errors + 1;
-                    end
-                end
-
-                5'd3: begin
                     if (wb_data !== 32'd7) begin
-                        $display("ERROR: x3 expected 7; wrong-path instruction may not have been flushed");
+                        $display("ERROR: Expected x2 = 7");
                         errors = errors + 1;
                     end
                 end
 
-                5'd4: begin
-                    if (wb_data !== 32'd9) begin
-                        $display("ERROR: x4 expected 9");
+                5'd6: begin
+                    if (wb_data !== 32'd20) begin
+                        $display("ERROR: JALR link address should be 20");
                         errors = errors + 1;
                     end
+                end
+
+                5'd8: begin
+                    if (wb_data !== 32'd11) begin
+                        $display("ERROR: Expected x8 = 11");
+                        errors = errors + 1;
+                    end
+                end
+
+                5'd7: begin
+                    $display("ERROR: Wrong-path instruction wrote to x7");
+                    errors = errors + 1;
                 end
 
                 default: begin
-                    $display("ERROR: Unexpected register write x%0d",
-                             wb_rd);
+                    $display("ERROR: Unexpected write to x%0d", wb_rd);
                     errors = errors + 1;
                 end
 
@@ -108,7 +124,7 @@ module tb_rv32i_top;
         end
     end
 
-    // Main branch test
+    // Main JAL/JALR test
     initial begin
 
         reset = 1'b1;
@@ -117,34 +133,42 @@ module tb_rv32i_top;
         cycles = 0;
         redirect_count = 0;
 
-        // ------------------------------------------------
+        // ---------------------------------------------
         // PROGRAM
-        // ------------------------------------------------
+        // ---------------------------------------------
 
-        // ADDI x1, x0, 5
-        dut.IMEM.memory[0] = 32'h00500093;
+        // Address 0x00:
+        // ADDI x4, x0, 25
+        dut.IMEM.memory[0] = 32'h01900213;
 
-        // ADDI x2, x0, 5
-        dut.IMEM.memory[1] = 32'h00500113;
+        // Address 0x04:
+        // JAL x5, +8
+        dut.IMEM.memory[1] = 32'h008002ef;
 
-        // BEQ x1, x2, +8 (TAKEN)
-        dut.IMEM.memory[2] = 32'h00208463;
+        // Address 0x08:
+        // ADDI x7, x0, 99 (MUST BE FLUSHED)
+        dut.IMEM.memory[2] = 32'h06300393;
 
-        // ADDI x3, x0, 99 (MUST BE FLUSHED)
-        dut.IMEM.memory[3] = 32'h06300193;
+        // Address 0x0C:
+        // ADDI x2, x0, 7
+        dut.IMEM.memory[3] = 32'h00700113;
 
-        // ADDI x3, x0, 7 (BRANCH TARGET)
-        dut.IMEM.memory[4] = 32'h00700193;
+        // Address 0x10:
+        // JALR x6, 0(x4)
+        // x4 = 25, target = 24 after clearing bit 0
+        dut.IMEM.memory[4] = 32'h00020367;
 
-        // BNE x1, x2, +8 (NOT TAKEN)
-        dut.IMEM.memory[5] = 32'h00209463;
+        // Address 0x14:
+        // ADDI x7, x0, 99 (MUST BE FLUSHED)
+        dut.IMEM.memory[5] = 32'h06300393;
 
-        // ADDI x4, x0, 9
-        dut.IMEM.memory[6] = 32'h00900213;
+        // Address 0x18:
+        // ADDI x8, x0, 11
+        dut.IMEM.memory[6] = 32'h00b00413;
 
-        // ------------------------------------------------
+        // ---------------------------------------------
         // RESET
-        // ------------------------------------------------
+        // ---------------------------------------------
 
         repeat (2) @(posedge clk);
 
@@ -158,35 +182,35 @@ module tb_rv32i_top;
 
         @(negedge clk);
 
-        // ------------------------------------------------
+        // ---------------------------------------------
         // SUMMARY
-        // ------------------------------------------------
+        // ---------------------------------------------
 
         $display("");
         $display("======================================");
-        $display(" BRANCH AND FLUSH TEST SUMMARY");
+        $display(" JAL / JALR TEST SUMMARY");
         $display("======================================");
 
         $display("Cycles executed : %0d", cycles);
         $display("Writebacks      : %0d", write_count);
-        $display("Redirects       : %0d", redirect_count);
+        $display("Jump redirects  : %0d", redirect_count);
         $display("Errors          : %0d", errors);
 
-        if (write_count != 4) begin
-            $display("ERROR: Expected exactly 4 writebacks");
+        if (write_count != 5) begin
+            $display("ERROR: Expected exactly 5 writebacks");
             errors = errors + 1;
         end
 
-        if (redirect_count != 1) begin
-            $display("ERROR: Expected exactly 1 branch redirect");
+        if (redirect_count != 2) begin
+            $display("ERROR: Expected exactly 2 jump redirects");
             errors = errors + 1;
         end
 
         if (errors == 0) begin
-            $display("ALL BRANCH TESTS PASSED");
+            $display("ALL JAL/JALR TESTS PASSED");
         end
         else begin
-            $display("BRANCH TEST FAILED");
+            $display("JAL/JALR TEST FAILED");
         end
 
         $display("======================================");
