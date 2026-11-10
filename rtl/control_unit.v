@@ -18,6 +18,8 @@ module control_unit (
     output reg mem_write,
     output reg alu_src,
 
+    output reg [1:0] alu_a_sel,
+
     output reg branch,
     output reg jump,
     output reg jalr,
@@ -31,11 +33,13 @@ module control_unit (
 
     always @(*) begin
 
-        // Safe default values
+        // Safe defaults: no side effects
         reg_write = 1'b0;
         mem_read  = 1'b0;
         mem_write = 1'b0;
+
         alu_src   = 1'b0;
+        alu_a_sel = 2'b00;
 
         branch = 1'b0;
         jump   = 1'b0;
@@ -49,75 +53,99 @@ module control_unit (
 
         if (instruction_valid) begin
 
-            // R-type arithmetic
+            // R-type: rs1 op rs2
             if (is_r_type) begin
                 reg_write = 1'b1;
                 alu_op    = 2'b10;
-                uses_rs1  = 1'b1;
-                uses_rs2  = 1'b1;
+
+                alu_a_sel = 2'b00;
+                alu_src   = 1'b0;
+
+                uses_rs1 = 1'b1;
+                uses_rs2 = 1'b1;
             end
 
-            // I-type arithmetic
+            // I-type arithmetic: rs1 op immediate
             else if (is_i_type) begin
                 reg_write = 1'b1;
-                alu_src   = 1'b1;
                 alu_op    = 2'b10;
-                uses_rs1  = 1'b1;
+
+                alu_a_sel = 2'b00;
+                alu_src   = 1'b1;
+
+                uses_rs1 = 1'b1;
             end
 
-            // Load instructions
+            // Load: rs1 + immediate
             else if (is_load) begin
                 reg_write = 1'b1;
                 mem_read  = 1'b1;
+
+                alu_a_sel = 2'b00;
                 alu_src   = 1'b1;
-                wb_sel    = 2'b01;
-                uses_rs1  = 1'b1;
+
+                wb_sel = 2'b01;
+                uses_rs1 = 1'b1;
             end
 
-            // Store instructions
+            // Store: rs1 + immediate
             else if (is_store) begin
                 mem_write = 1'b1;
+
+                alu_a_sel = 2'b00;
                 alu_src   = 1'b1;
-                uses_rs1  = 1'b1;
-                uses_rs2  = 1'b1;
+
+                uses_rs1 = 1'b1;
+                uses_rs2 = 1'b1;
             end
 
-            // Branch instructions
+            // Branch comparison: rs1 versus rs2
             else if (is_branch) begin
-                branch    = 1'b1;
-                alu_op    = 2'b01;
-                uses_rs1  = 1'b1;
-                uses_rs2  = 1'b1;
+                branch = 1'b1;
+                alu_op = 2'b01;
+
+                alu_a_sel = 2'b00;
+                alu_src   = 1'b0;
+
+                uses_rs1 = 1'b1;
+                uses_rs2 = 1'b1;
             end
 
-            // JAL
+            // JAL: link address = PC + 4
             else if (is_jal) begin
                 reg_write = 1'b1;
                 jump      = 1'b1;
-                wb_sel    = 2'b10;
+
+                wb_sel = 2'b10;
             end
 
-            // JALR
+            // JALR: target = rs1 + immediate
             else if (is_jalr) begin
                 reg_write = 1'b1;
                 jump      = 1'b1;
                 jalr      = 1'b1;
+
+                alu_a_sel = 2'b00;
                 alu_src   = 1'b1;
-                wb_sel    = 2'b10;
-                uses_rs1  = 1'b1;
+
+                wb_sel = 2'b10;
+                uses_rs1 = 1'b1;
             end
 
-            // LUI
+            // LUI: zero + immediate
             else if (is_lui) begin
                 reg_write = 1'b1;
+
+                alu_a_sel = 2'b10;
                 alu_src   = 1'b1;
             end
 
-            // AUIPC
+            // AUIPC: PC + immediate
             else if (is_auipc) begin
                 reg_write = 1'b1;
+
+                alu_a_sel = 2'b01;
                 alu_src   = 1'b1;
-                uses_rs1  = 1'b0;
             end
 
         end

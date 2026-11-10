@@ -19,6 +19,7 @@ module tb_control_unit;
     wire mem_read;
     wire mem_write;
     wire alu_src;
+    wire [1:0] alu_a_sel;
 
     wire branch;
     wire jump;
@@ -50,6 +51,7 @@ module tb_control_unit;
         .mem_read(mem_read),
         .mem_write(mem_write),
         .alu_src(alu_src),
+        .alu_a_sel(alu_a_sel),
 
         .branch(branch),
         .jump(jump),
@@ -65,10 +67,10 @@ module tb_control_unit;
     task check_controls;
         input valid;
         input [8:0] instruction_class;
-        input [12:0] expected;
+        input [14:0] expected;
         input [255:0] test_name;
 
-        reg [12:0] actual;
+        reg [14:0] actual;
 
         begin
             instruction_valid = valid;
@@ -83,6 +85,7 @@ module tb_control_unit;
 
             actual = {
                 reg_write, mem_read, mem_write, alu_src,
+                alu_a_sel,
                 branch, jump, jalr,
                 alu_op, wb_sel,
                 uses_rs1, uses_rs2
@@ -92,8 +95,8 @@ module tb_control_unit;
 
             if (actual !== expected) begin
                 $display("FAIL: %0s", test_name);
-                $display("Expected: %013b", expected);
-                $display("Actual  : %013b", actual);
+                $display("Expected: %015b", expected);
+                $display("Actual  : %015b", actual);
                 errors = errors + 1;
             end
             else begin
@@ -111,64 +114,69 @@ module tb_control_unit;
         $display("CONTROL UNIT TESTING");
         $display("-----------------------------------");
 
-        // R-type: ADD
+        // R-type: rs1 operation rs2
         check_controls(1'b1, 9'b100000000,
-            {1'b1,1'b0,1'b0,1'b0,1'b0,1'b0,1'b0,
-             2'b10,2'b00,1'b1,1'b1},
+            {1'b1,1'b0,1'b0,1'b0,2'b00,
+             1'b0,1'b0,1'b0,2'b10,2'b00,1'b1,1'b1},
             "R-type control signals");
 
-        // I-type: ADDI
+        // I-type: rs1 operation immediate
         check_controls(1'b1, 9'b010000000,
-            {1'b1,1'b0,1'b0,1'b1,1'b0,1'b0,1'b0,
-             2'b10,2'b00,1'b1,1'b0},
+            {1'b1,1'b0,1'b0,1'b1,2'b00,
+             1'b0,1'b0,1'b0,2'b10,2'b00,1'b1,1'b0},
             "I-type control signals");
 
-        // Load: LW
+        // Load: rs1 + immediate
         check_controls(1'b1, 9'b001000000,
-            {1'b1,1'b1,1'b0,1'b1,1'b0,1'b0,1'b0,
-             2'b00,2'b01,1'b1,1'b0},
+            {1'b1,1'b1,1'b0,1'b1,2'b00,
+             1'b0,1'b0,1'b0,2'b00,2'b01,1'b1,1'b0},
             "Load control signals");
 
-        // Store: SW
+        // Store: rs1 + immediate
         check_controls(1'b1, 9'b000100000,
-            {1'b0,1'b0,1'b1,1'b1,1'b0,1'b0,1'b0,
-             2'b00,2'b00,1'b1,1'b1},
+            {1'b0,1'b0,1'b1,1'b1,2'b00,
+             1'b0,1'b0,1'b0,2'b00,2'b00,1'b1,1'b1},
             "Store control signals");
 
-        // Branch: BEQ
+        // Branch: compare rs1 and rs2
         check_controls(1'b1, 9'b000010000,
-            {1'b0,1'b0,1'b0,1'b0,1'b1,1'b0,1'b0,
-             2'b01,2'b00,1'b1,1'b1},
+            {1'b0,1'b0,1'b0,1'b0,2'b00,
+             1'b1,1'b0,1'b0,2'b01,2'b00,1'b1,1'b1},
             "Branch control signals");
 
-        // JAL
+        // JAL: PC+4 link writeback
         check_controls(1'b1, 9'b000001000,
-            {1'b1,1'b0,1'b0,1'b0,1'b0,1'b1,1'b0,
-             2'b00,2'b10,1'b0,1'b0},
+            {1'b1,1'b0,1'b0,1'b0,2'b00,
+             1'b0,1'b1,1'b0,2'b00,2'b10,1'b0,1'b0},
             "JAL control signals");
 
-        // JALR
+        // JALR: rs1 + immediate target
         check_controls(1'b1, 9'b000000100,
-            {1'b1,1'b0,1'b0,1'b1,1'b0,1'b1,1'b1,
-             2'b00,2'b10,1'b1,1'b0},
+            {1'b1,1'b0,1'b0,1'b1,2'b00,
+             1'b0,1'b1,1'b1,2'b00,2'b10,1'b1,1'b0},
             "JALR control signals");
 
-        // LUI
+        // LUI: zero + immediate
         check_controls(1'b1, 9'b000000010,
-            {1'b1,1'b0,1'b0,1'b1,1'b0,1'b0,1'b0,
-             2'b00,2'b00,1'b0,1'b0},
+            {1'b1,1'b0,1'b0,1'b1,2'b10,
+             1'b0,1'b0,1'b0,2'b00,2'b00,1'b0,1'b0},
             "LUI control signals");
 
-        // AUIPC
+        // AUIPC: PC + immediate
         check_controls(1'b1, 9'b000000001,
-            {1'b1,1'b0,1'b0,1'b1,1'b0,1'b0,1'b0,
-             2'b00,2'b00,1'b0,1'b0},
+            {1'b1,1'b0,1'b0,1'b1,2'b01,
+             1'b0,1'b0,1'b0,2'b00,2'b00,1'b0,1'b0},
             "AUIPC control signals");
 
-        // Invalid instruction: safe defaults
+        // Invalid instruction
         check_controls(1'b0, 9'b000000000,
-            13'b0000000000000,
+            15'b0,
             "Invalid instruction defaults");
+
+        // Invalid instruction must suppress every side effect
+        check_controls(1'b0, 9'b111111111,
+            15'b0,
+            "Invalid instruction suppresses all controls");
 
         $display("-----------------------------------");
         $display("TESTS COMPLETED");

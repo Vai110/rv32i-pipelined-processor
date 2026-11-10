@@ -20,9 +20,18 @@ module id_ex_register (
     input wire [4:0] rs2_in,
     input wire [4:0] rd_in,
 
+    // ALU operand selection
+    // 00 = rs1, 01 = PC, 10 = zero
+    input wire [1:0] alu_a_sel_in,
+    // alu_src: 0 = rs2, 1 = immediate
+    input wire alu_src_in,
+
+    // Source register usage
+    input wire uses_rs1_in,
+    input wire uses_rs2_in,
+
     // ALU control
     input wire [3:0] alu_control_in,
-    input wire alu_src_in,
 
     // Memory control
     input wire mem_read_in,
@@ -51,8 +60,13 @@ module id_ex_register (
     output reg [4:0] rs2_out,
     output reg [4:0] rd_out,
 
-    output reg [3:0] alu_control_out,
+    output reg [1:0] alu_a_sel_out,
     output reg alu_src_out,
+
+    output reg uses_rs1_out,
+    output reg uses_rs2_out,
+
+    output reg [3:0] alu_control_out,
 
     output reg mem_read_out,
     output reg mem_write_out,
@@ -64,12 +78,10 @@ module id_ex_register (
     output reg jump_out,
     output reg jalr_out,
     output reg [2:0] funct3_out
-
 );
 
     always @(posedge clk) begin
 
-        // Highest priority: synchronous reset
         if (reset) begin
 
             pc_out <= 32'b0;
@@ -77,15 +89,19 @@ module id_ex_register (
 
             rs1_data_out <= 32'b0;
             rs2_data_out <= 32'b0;
-
             immediate_out <= 32'b0;
 
             rs1_out <= 5'b0;
             rs2_out <= 5'b0;
             rd_out <= 5'b0;
 
-            alu_control_out <= 4'b0;
+            alu_a_sel_out <= 2'b00;
             alu_src_out <= 1'b0;
+
+            uses_rs1_out <= 1'b0;
+            uses_rs2_out <= 1'b0;
+
+            alu_control_out <= 4'b0;
 
             mem_read_out <= 1'b0;
             mem_write_out <= 1'b0;
@@ -100,7 +116,6 @@ module id_ex_register (
 
         end
 
-        // Flush inserts a bubble by clearing control signals
         else if (flush) begin
 
             pc_out <= 32'b0;
@@ -108,15 +123,19 @@ module id_ex_register (
 
             rs1_data_out <= 32'b0;
             rs2_data_out <= 32'b0;
-
             immediate_out <= 32'b0;
 
             rs1_out <= 5'b0;
             rs2_out <= 5'b0;
             rd_out <= 5'b0;
 
-            alu_control_out <= 4'b0;
+            alu_a_sel_out <= 2'b00;
             alu_src_out <= 1'b0;
+
+            uses_rs1_out <= 1'b0;
+            uses_rs2_out <= 1'b0;
+
+            alu_control_out <= 4'b0;
 
             mem_read_out <= 1'b0;
             mem_write_out <= 1'b0;
@@ -131,7 +150,6 @@ module id_ex_register (
 
         end
 
-        // Capture new decoded instruction information
         else if (enable) begin
 
             pc_out <= pc_in;
@@ -139,15 +157,19 @@ module id_ex_register (
 
             rs1_data_out <= rs1_data_in;
             rs2_data_out <= rs2_data_in;
-
             immediate_out <= immediate_in;
 
             rs1_out <= rs1_in;
             rs2_out <= rs2_in;
             rd_out <= rd_in;
 
-            alu_control_out <= alu_control_in;
+            alu_a_sel_out <= alu_a_sel_in;
             alu_src_out <= alu_src_in;
+
+            uses_rs1_out <= uses_rs1_in;
+            uses_rs2_out <= uses_rs2_in;
+
+            alu_control_out <= alu_control_in;
 
             mem_read_out <= mem_read_in;
             mem_write_out <= mem_write_in;
@@ -162,9 +184,8 @@ module id_ex_register (
 
         end
 
-        // Otherwise hold previous values
+        // Otherwise, retain previous values.
 
     end
 
 endmodule
-
