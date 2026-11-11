@@ -18,7 +18,10 @@ module tb_rv32i_top;
 
     reg [31:0] observed [0:31];
 
-    rv32i_top dut (
+    // Processor instance: program contains 16 instructions
+    rv32i_top #(
+        .PROGRAM_WORDS(16)
+    ) dut (
         .clk(clk),
         .reset(reset),
         .pc_out(pc_out),
@@ -59,7 +62,7 @@ module tb_rv32i_top;
     // ==========================================
 
     always @(negedge clk) begin
-        if (!reset && dut.ex_mem_mem_read) begin
+        if (!reset && dut.ex_mem_mem_read && dut.ex_mem_valid) begin
 
             $display(
                 "LOAD DEBUG: ADDR=%08h FUNCT3=%03b MEM=%02h READ=%08h WB_SEL=%02b",

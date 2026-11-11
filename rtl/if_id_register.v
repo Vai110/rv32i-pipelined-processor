@@ -1,3 +1,4 @@
+
 module if_id_register (
 
     input wire clk,
@@ -5,9 +6,13 @@ module if_id_register (
     input wire enable,
     input wire flush,
 
+    input wire valid_in,
+
     input wire [31:0] pc_in,
     input wire [31:0] pc_plus4_in,
     input wire [31:0] instruction_in,
+
+    output reg valid_out,
 
     output reg [31:0] pc_out,
     output reg [31:0] pc_plus4_out,
@@ -17,26 +22,32 @@ module if_id_register (
 
     always @(posedge clk) begin
 
-        // Reset has the highest priority
+        // Reset has the highest priority.
         if (reset) begin
 
+            valid_out <= 1'b0;
+
             pc_out <= 32'b0;
             pc_plus4_out <= 32'b0;
             instruction_out <= 32'h00000013;
 
         end
 
-        // Flush inserts a NOP into the pipeline
+        // Flush inserts an invalid bubble.
         else if (flush) begin
 
+            valid_out <= 1'b0;
+
             pc_out <= 32'b0;
             pc_plus4_out <= 32'b0;
             instruction_out <= 32'h00000013;
 
         end
 
-        // Enable allows new data to enter
+        // Capture a new instruction and its validity.
         else if (enable) begin
+
+            valid_out <= valid_in;
 
             pc_out <= pc_in;
             pc_plus4_out <= pc_plus4_in;
@@ -44,7 +55,7 @@ module if_id_register (
 
         end
 
-        // Otherwise, hold the previous values
+        // Otherwise, hold all previous values.
 
     end
 

@@ -7,10 +7,13 @@ module tb_if_id_register;
     reg reset;
     reg enable;
     reg flush;
+    reg valid_in;
 
     reg [31:0] pc_in;
     reg [31:0] pc_plus4_in;
     reg [31:0] instruction_in;
+
+    wire valid_out;
 
     wire [31:0] pc_out;
     wire [31:0] pc_plus4_out;
@@ -24,6 +27,8 @@ module tb_if_id_register;
         .reset(reset),
         .enable(enable),
         .flush(flush),
+        .valid_in(valid_in),
+        .valid_out(valid_out),
         .pc_in(pc_in),
         .pc_plus4_in(pc_plus4_in),
         .instruction_in(instruction_in),
@@ -32,10 +37,10 @@ module tb_if_id_register;
         .instruction_out(instruction_out)
     );
 
-    // Generate a 10 ns clock
     always #5 clk = ~clk;
 
     task check_result;
+        input expected_valid;
         input [31:0] expected_pc;
         input [31:0] expected_pc_plus4;
         input [31:0] expected_instruction;
@@ -44,11 +49,14 @@ module tb_if_id_register;
         begin
             tests = tests + 1;
 
-            if ((pc_out !== expected_pc) ||
+            if ((valid_out !== expected_valid) ||
+                (pc_out !== expected_pc) ||
                 (pc_plus4_out !== expected_pc_plus4) ||
                 (instruction_out !== expected_instruction)) begin
 
                 $display("FAIL: %0s", test_name);
+                $display("Expected valid: %b | Actual: %b",
+                         expected_valid, valid_out);
                 $display("Expected PC: %h | Actual: %h",
                          expected_pc, pc_out);
                 $display("Expected PC+4: %h | Actual: %h",
@@ -70,6 +78,7 @@ module tb_if_id_register;
         reset = 0;
         enable = 0;
         flush = 0;
+        valid_in = 0;
 
         pc_in = 0;
         pc_plus4_in = 0;
@@ -91,17 +100,14 @@ module tb_if_id_register;
 
         @(posedge clk);
         #1;
-        check_result(
-            32'h00000000,
-            32'h00000000,
-            32'h00000013,
-            "Reset clears register and inserts NOP"
-        );
+        check_result(0, 0, 0, 32'h00000013,
+                     "Reset clears register and validity");
 
-        // Test 2: Normal data transfer
+        // Test 2: Normal valid instruction transfer
         @(negedge clk);
         reset = 0;
         enable = 1;
+        valid_in = 1;
 
         pc_in = 32'h00001000;
         pc_plus4_in = 32'h00001004;
@@ -109,14 +115,11 @@ module tb_if_id_register;
 
         @(posedge clk);
         #1;
-        check_result(
-            32'h00001000,
-            32'h00001004,
-            32'h002081B3,
-            "Normal data transfer"
-        );
+        check_result(1, 32'h00001000, 32'h00001004,
+                     32'h002081B3,
+                     "Valid instruction transfer");
 
-        // Test 3: Capture updated data
+        // Test 3: Capture updated instruction
         @(negedge clk);
 
         pc_in = 32'h00001004;
@@ -125,16 +128,14 @@ module tb_if_id_register;
 
         @(posedge clk);
         #1;
-        check_result(
-            32'h00001004,
-            32'h00001008,
-            32'h00410233,
-            "Capture updated instruction"
-        );
+        check_result(1, 32'h00001004, 32'h00001008,
+                     32'h00410233,
+                     "Capture updated instruction");
 
         // Test 4: Stall / hold
         @(negedge clk);
         enable = 0;
+        valid_in = 0;
 
         pc_in = 32'h00002000;
         pc_plus4_in = 32'h00002004;
@@ -142,12 +143,9 @@ module tb_if_id_register;
 
         @(posedge clk);
         #1;
-        check_result(
-            32'h00001004,
-            32'h00001008,
-            32'h00410233,
-            "Stall holds previous values"
-        );
+        check_result(1, 32'h00001004, 32'h00001008,
+                     32'h00410233,
+                     "Stall holds instruction and validity");
 
         // Test 5: Flush
         @(negedge clk);
@@ -156,17 +154,14 @@ module tb_if_id_register;
 
         @(posedge clk);
         #1;
-        check_result(
-            32'h00000000,
-            32'h00000000,
-            32'h00000013,
-            "Flush inserts NOP"
-        );
+        check_result(0, 0, 0, 32'h00000013,
+                     "Flush clears validity and inserts NOP");
 
         // Test 6: Flush has priority over enable
         @(negedge clk);
         flush = 1;
         enable = 1;
+        valid_in = 1;
 
         pc_in = 32'h00003000;
         pc_plus4_in = 32'h00003004;
@@ -174,12 +169,8 @@ module tb_if_id_register;
 
         @(posedge clk);
         #1;
-        check_result(
-            32'h00000000,
-            32'h00000000,
-            32'h00000013,
-            "Flush priority over enable"
-        );
+        check_result(0, 0, 0, 32'h00000013,
+                     "Flush priority over enable");
 
         // Test 7: Reset has priority over flush
         @(negedge clk);
@@ -188,18 +179,15 @@ module tb_if_id_register;
 
         @(posedge clk);
         #1;
-        check_result(
-            32'h00000000,
-            32'h00000000,
-            32'h00000013,
-            "Reset priority over flush"
-        );
+        check_result(0, 0, 0, 32'h00000013,
+                     "Reset priority over flush");
 
         // Test 8: Capture after reset
         @(negedge clk);
         reset = 0;
         flush = 0;
         enable = 1;
+        valid_in = 1;
 
         pc_in = 32'h00004000;
         pc_plus4_in = 32'h00004004;
@@ -207,12 +195,20 @@ module tb_if_id_register;
 
         @(posedge clk);
         #1;
-        check_result(
-            32'h00004000,
-            32'h00004004,
-            32'h00000013,
-            "Normal operation after reset"
-        );
+        check_result(1, 32'h00004000, 32'h00004004,
+                     32'h00000013,
+                     "Normal operation after reset");
+
+        // Test 9: Explicit invalid bubble transfer
+        @(negedge clk);
+        valid_in = 0;
+        instruction_in = 32'h00000013;
+
+        @(posedge clk);
+        #1;
+        check_result(0, 32'h00004000, 32'h00004004,
+                     32'h00000013,
+                     "Invalid NOP is identified as a bubble");
 
         $display("-------------------------------------");
         $display("IF/ID REGISTER TESTING COMPLETED");

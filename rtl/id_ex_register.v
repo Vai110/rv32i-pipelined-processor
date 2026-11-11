@@ -6,6 +6,10 @@ module id_ex_register (
     input wire enable,
     input wire flush,
 
+    // Instruction validity
+    input wire valid_in,
+    output reg valid_out,
+
     // Program counter information
     input wire [31:0] pc_in,
     input wire [31:0] pc_plus4_in,
@@ -21,9 +25,7 @@ module id_ex_register (
     input wire [4:0] rd_in,
 
     // ALU operand selection
-    // 00 = rs1, 01 = PC, 10 = zero
     input wire [1:0] alu_a_sel_in,
-    // alu_src: 0 = rs2, 1 = immediate
     input wire alu_src_in,
 
     // Source register usage
@@ -84,6 +86,8 @@ module id_ex_register (
 
         if (reset) begin
 
+            valid_out <= 1'b0;
+
             pc_out <= 32'b0;
             pc_plus4_out <= 32'b0;
 
@@ -117,6 +121,8 @@ module id_ex_register (
         end
 
         else if (flush) begin
+
+            valid_out <= 1'b0;
 
             pc_out <= 32'b0;
             pc_plus4_out <= 32'b0;
@@ -152,6 +158,8 @@ module id_ex_register (
 
         else if (enable) begin
 
+            valid_out <= valid_in;
+
             pc_out <= pc_in;
             pc_plus4_out <= pc_plus4_in;
 
@@ -184,7 +192,7 @@ module id_ex_register (
 
         end
 
-        // Otherwise, retain previous values.
+        // Otherwise, all outputs retain their previous values.
 
     end
 

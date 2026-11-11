@@ -1,9 +1,15 @@
 
+`timescale 1ns/1ps
+
 module ex_mem_register (
     input wire clk,
     input wire reset,
     input wire enable,
     input wire flush,
+
+    // Instruction validity
+    input wire valid_in,
+    output reg valid_out,
 
     input wire [31:0] pc_plus4_in,
     input wire [31:0] alu_result_in,
@@ -31,7 +37,10 @@ module ex_mem_register (
 );
 
     always @(posedge clk) begin
+
         if (reset) begin
+            valid_out <= 1'b0;
+
             pc_plus4_out <= 32'b0;
             alu_result_out <= 32'b0;
             rs2_data_out <= 32'b0;
@@ -44,7 +53,10 @@ module ex_mem_register (
             reg_write_out <= 1'b0;
             wb_sel_out <= 2'b0;
         end
+
         else if (flush) begin
+            valid_out <= 1'b0;
+
             pc_plus4_out <= 32'b0;
             alu_result_out <= 32'b0;
             rs2_data_out <= 32'b0;
@@ -57,7 +69,10 @@ module ex_mem_register (
             reg_write_out <= 1'b0;
             wb_sel_out <= 2'b0;
         end
+
         else if (enable) begin
+            valid_out <= valid_in;
+
             pc_plus4_out <= pc_plus4_in;
             alu_result_out <= alu_result_in;
             rs2_data_out <= rs2_data_in;
@@ -70,6 +85,9 @@ module ex_mem_register (
             reg_write_out <= reg_write_in;
             wb_sel_out <= wb_sel_in;
         end
+
+        // Otherwise, retain previous values.
+
     end
 
 endmodule

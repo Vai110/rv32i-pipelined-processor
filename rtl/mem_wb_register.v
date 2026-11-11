@@ -1,9 +1,11 @@
-
 module mem_wb_register (
     input wire clk,
     input wire reset,
     input wire enable,
     input wire flush,
+
+    input wire valid_in,
+    output reg valid_out,
 
     input wire [31:0] pc_plus4_in,
     input wire [31:0] alu_result_in,
@@ -31,6 +33,7 @@ module mem_wb_register (
 
             reg_write_out <= 1'b0;
             wb_sel_out <= 2'b0;
+            valid_out <= 1'b0;
         end
         else if (flush) begin
             pc_plus4_out <= 32'b0;
@@ -40,6 +43,7 @@ module mem_wb_register (
 
             reg_write_out <= 1'b0;
             wb_sel_out <= 2'b0;
+            valid_out <= 1'b0;
         end
         else if (enable) begin
             pc_plus4_out <= pc_plus4_in;
@@ -49,6 +53,7 @@ module mem_wb_register (
 
             reg_write_out <= reg_write_in;
             wb_sel_out <= wb_sel_in;
+            valid_out <= valid_in;
         end
     end
 

@@ -8,6 +8,9 @@ module tb_ex_mem_register;
     reg enable;
     reg flush;
 
+    reg valid_in;
+    wire valid_out;
+
     reg [31:0] pc_plus4_in;
     reg [31:0] alu_result_in;
     reg [31:0] rs2_data_in;
@@ -32,17 +35,21 @@ module tb_ex_mem_register;
     wire reg_write_out;
     wire [1:0] wb_sel_out;
 
-    integer errors = 0;
-    integer tests = 0;
+    integer errors;
+    integer tests;
 
-    reg [151:0] actual;
-    reg [151:0] expected;
+    // 109-bit payload + 1 validity bit = 110 bits.
+    reg [109:0] actual;
+    reg [109:0] expected;
 
     ex_mem_register uut (
         .clk(clk),
         .reset(reset),
         .enable(enable),
         .flush(flush),
+
+        .valid_in(valid_in),
+        .valid_out(valid_out),
 
         .pc_plus4_in(pc_plus4_in),
         .alu_result_in(alu_result_in),
@@ -72,12 +79,14 @@ module tb_ex_mem_register;
     always #5 clk = ~clk;
 
     task check_result;
-        input [151:0] expected_value;
+        input [109:0] expected_value;
         input [255:0] test_name;
+
         begin
             tests = tests + 1;
 
             actual = {
+                valid_out,
                 pc_plus4_out,
                 alu_result_out,
                 rs2_data_out,
@@ -104,23 +113,30 @@ module tb_ex_mem_register;
     endtask
 
     initial begin
-        $dumpfile("simulation/waveforms/ex_mem_wave.vcd");
-        $dumpvars(0, tb_ex_mem_register);
 
         clk = 0;
         reset = 0;
         enable = 0;
         flush = 0;
+        valid_in = 0;
 
         pc_plus4_in = 0;
         alu_result_in = 0;
         rs2_data_in = 0;
         rd_in = 0;
+
         mem_read_in = 0;
         mem_write_in = 0;
         funct3_in = 0;
+
         reg_write_in = 0;
         wb_sel_in = 0;
+
+        errors = 0;
+        tests = 0;
+
+        $dumpfile("simulation/waveforms/ex_mem_wave.vcd");
+        $dumpvars(0, tb_ex_mem_register);
 
         $display("-------------------------------------");
         $display("EX/MEM REGISTER TESTING STARTED");
@@ -129,15 +145,21 @@ module tb_ex_mem_register;
         // Test 1: Reset
         @(negedge clk);
         reset = 1;
+
         @(posedge clk);
         #1;
 
-        check_result(152'b0, "Reset clears all outputs");
+        check_result(
+            110'b0,
+            "Reset clears all outputs and validity"
+        );
 
         // Test 2: Capture all signals
         @(negedge clk);
+
         reset = 0;
         enable = 1;
+        valid_in = 1;
 
         pc_plus4_in = 32'h00001004;
         alu_result_in = 32'h12345678;
@@ -147,6 +169,7 @@ module tb_ex_mem_register;
         mem_read_in = 1;
         mem_write_in = 0;
         funct3_in = 3'b010;
+
         reg_write_in = 1;
         wb_sel_in = 2'b01;
 
@@ -154,14 +177,26 @@ module tb_ex_mem_register;
         #1;
 
         check_result(
-            {32'h00001004, 32'h12345678, 32'hAABBCCDD,
-             5'd10, 1'b1, 1'b0, 3'b010, 1'b1, 2'b01},
-            "Capture data and control signals"
+            {
+                1'b1,
+                32'h00001004,
+                32'h12345678,
+                32'hAABBCCDD,
+                5'd10,
+                1'b1,
+                1'b0,
+                3'b010,
+                1'b1,
+                2'b01
+            },
+            "Capture valid instruction and control signals"
         );
 
-        // Test 3: Stall
+        // Test 3: Stall / hold
         @(negedge clk);
+
         enable = 0;
+        valid_in = 0;
 
         pc_plus4_in = 32'hDEADBEEF;
         alu_result_in = 32'hFFFFFFFF;
@@ -171,6 +206,7 @@ module tb_ex_mem_register;
         mem_read_in = 0;
         mem_write_in = 1;
         funct3_in = 3'b000;
+
         reg_write_in = 0;
         wb_sel_in = 2'b10;
 
@@ -178,23 +214,39 @@ module tb_ex_mem_register;
         #1;
 
         check_result(
-            {32'h00001004, 32'h12345678, 32'hAABBCCDD,
-             5'd10, 1'b1, 1'b0, 3'b010, 1'b1, 2'b01},
-            "Stall holds previous values"
+            {
+                1'b1,
+                32'h00001004,
+                32'h12345678,
+                32'hAABBCCDD,
+                5'd10,
+                1'b1,
+                1'b0,
+                3'b010,
+                1'b1,
+                2'b01
+            },
+            "Stall holds previous values and validity"
         );
 
         // Test 4: Flush
         @(negedge clk);
+
         enable = 1;
         flush = 1;
+        valid_in = 1;
 
         @(posedge clk);
         #1;
 
-        check_result(152'b0, "Flush inserts bubble");
+        check_result(
+            110'b0,
+            "Flush inserts invalid bubble"
+        );
 
         // Test 5: Flush priority over enable
         @(negedge clk);
+
         pc_plus4_in = 32'h00002004;
         alu_result_in = 32'h87654321;
         rs2_data_in = 32'h55555555;
@@ -203,21 +255,28 @@ module tb_ex_mem_register;
         mem_read_in = 1;
         mem_write_in = 1;
         funct3_in = 3'b001;
+
         reg_write_in = 1;
         wb_sel_in = 2'b10;
 
         flush = 1;
         enable = 1;
+        valid_in = 1;
 
         @(posedge clk);
         #1;
 
-        check_result(152'b0, "Flush priority over enable");
+        check_result(
+            110'b0,
+            "Flush priority over enable"
+        );
 
         // Test 6: Capture after flush
         @(negedge clk);
+
         flush = 0;
         enable = 1;
+        valid_in = 1;
 
         pc_plus4_in = 32'h00003004;
         alu_result_in = 32'h0000002A;
@@ -227,6 +286,7 @@ module tb_ex_mem_register;
         mem_read_in = 0;
         mem_write_in = 1;
         funct3_in = 3'b010;
+
         reg_write_in = 0;
         wb_sel_in = 2'b00;
 
@@ -234,9 +294,85 @@ module tb_ex_mem_register;
         #1;
 
         check_result(
-            {32'h00003004, 32'h0000002A, 32'h00000055,
-             5'd7, 1'b0, 1'b1, 3'b010, 1'b0, 2'b00},
-            "Capture after flush"
+            {
+                1'b1,
+                32'h00003004,
+                32'h0000002A,
+                32'h00000055,
+                5'd7,
+                1'b0,
+                1'b1,
+                3'b010,
+                1'b0,
+                2'b00
+            },
+            "Capture valid instruction after flush"
+        );
+
+        // Test 7: Transfer an invalid instruction
+        @(negedge clk);
+
+        valid_in = 0;
+        pc_plus4_in = 32'h00004004;
+
+        @(posedge clk);
+        #1;
+
+        check_result(
+            {
+                1'b0,
+                32'h00004004,
+                32'h0000002A,
+                32'h00000055,
+                5'd7,
+                1'b0,
+                1'b1,
+                3'b010,
+                1'b0,
+                2'b00
+            },
+            "Invalid instruction is identified"
+        );
+
+        // Test 8: Reset priority over flush
+        @(negedge clk);
+
+        reset = 1;
+        flush = 1;
+
+        @(posedge clk);
+        #1;
+
+        check_result(
+            110'b0,
+            "Reset priority over flush"
+        );
+
+        // Test 9: Normal operation after reset
+        @(negedge clk);
+
+        reset = 0;
+        flush = 0;
+        enable = 1;
+        valid_in = 1;
+
+        @(posedge clk);
+        #1;
+
+        check_result(
+            {
+                1'b1,
+                32'h00004004,
+                32'h0000002A,
+                32'h00000055,
+                5'd7,
+                1'b0,
+                1'b1,
+                3'b010,
+                1'b0,
+                2'b00
+            },
+            "Normal operation after reset"
         );
 
         $display("-------------------------------------");
@@ -252,6 +388,7 @@ module tb_ex_mem_register;
         $display("-------------------------------------");
 
         $finish;
+
     end
 
 endmodule

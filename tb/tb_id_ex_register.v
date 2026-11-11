@@ -4,6 +4,8 @@
 module tb_id_ex_register;
 
     reg clk, reset, enable, flush;
+    reg valid_in;
+    wire valid_out;
 
     reg [31:0] pc_in, pc_plus4_in;
     reg [31:0] rs1_data_in, rs2_data_in, immediate_in;
@@ -51,6 +53,9 @@ module tb_id_ex_register;
         .reset(reset),
         .enable(enable),
         .flush(flush),
+
+        .valid_in(valid_in),
+        .valid_out(valid_out),
 
         .pc_in(pc_in),
         .pc_plus4_in(pc_plus4_in),
@@ -115,19 +120,20 @@ module tb_id_ex_register;
 
     always #5 clk = ~clk;
 
-    // Exact output width:
-    // 160 + 15 + 2 + 1 + 2 + 4 + 2 + 1 + 2 + 3 + 3 = 195 bits
+    // 196 bits = original 195-bit payload + 1 validity bit.
 
     task check_result;
-        input [194:0] expected;
+        input [195:0] expected;
         input [255:0] test_name;
 
-        reg [194:0] actual;
+        reg [195:0] actual;
 
         begin
             tests = tests + 1;
 
             actual = {
+                valid_out,
+
                 pc_out,
                 pc_plus4_out,
                 rs1_data_out,
@@ -170,8 +176,8 @@ module tb_id_ex_register;
         end
     endtask
 
-    localparam [194:0] ZERO_OUTPUT = 195'b0;
-    localparam [194:0] BUBBLE_OUTPUT = 195'b0;
+    localparam [195:0] ZERO_OUTPUT = 196'b0;
+    localparam [195:0] BUBBLE_OUTPUT = 196'b0;
 
     initial begin
 
@@ -179,6 +185,7 @@ module tb_id_ex_register;
         reset = 0;
         enable = 0;
         flush = 0;
+        valid_in = 0;
 
         pc_in = 0;
         pc_plus4_in = 0;
@@ -225,14 +232,14 @@ module tb_id_ex_register;
 
         @(posedge clk);
         #1;
-
-        check_result(ZERO_OUTPUT, "Reset clears all outputs");
+        check_result(ZERO_OUTPUT, "Reset clears outputs and validity");
 
         // Test 2: Capture all data and control signals
         @(negedge clk);
 
         reset = 0;
         enable = 1;
+        valid_in = 1;
 
         pc_in = 32'h00001000;
         pc_plus4_in = 32'h00001004;
@@ -268,34 +275,27 @@ module tb_id_ex_register;
         #1;
 
         check_result({
+            1'b1,
             32'h00001000,
             32'h00001004,
             32'h0000000A,
             32'h00000014,
             32'h00000020,
-
             5'd5, 5'd6, 5'd7,
-
-            2'b00,
-            1'b0,
-
+            2'b00, 1'b0,
             1'b1, 1'b1,
-
             4'b0000,
-
             1'b0, 1'b0,
-
-            1'b1,
-            2'b00,
-
+            1'b1, 2'b00,
             1'b0, 1'b0, 1'b0,
             3'b000
-        }, "Capture data and control signals");
+        }, "Capture valid instruction and control signals");
 
-        // Test 3: Stall / hold
+        // Test 3: Stall / hold must preserve validity
         @(negedge clk);
 
         enable = 0;
+        valid_in = 0;
 
         pc_in = 32'h00002000;
         pc_plus4_in = 32'h00002004;
@@ -311,46 +311,40 @@ module tb_id_ex_register;
         #1;
 
         check_result({
+            1'b1,
             32'h00001000,
             32'h00001004,
             32'h0000000A,
             32'h00000014,
             32'h00000020,
-
             5'd5, 5'd6, 5'd7,
-
-            2'b00,
-            1'b0,
-
+            2'b00, 1'b0,
             1'b1, 1'b1,
-
             4'b0000,
-
             1'b0, 1'b0,
-
-            1'b1,
-            2'b00,
-
+            1'b1, 2'b00,
             1'b0, 1'b0, 1'b0,
             3'b000
-        }, "Stall holds every output");
+        }, "Stall holds outputs and validity");
 
-        // Test 4: Flush
+        // Test 4: Flush inserts invalid bubble
         @(negedge clk);
 
         enable = 1;
         flush = 1;
+        valid_in = 1;
 
         @(posedge clk);
         #1;
 
-        check_result(BUBBLE_OUTPUT, "Flush inserts bubble");
+        check_result(BUBBLE_OUTPUT, "Flush inserts invalid bubble");
 
         // Test 5: Flush priority over enable
         @(negedge clk);
 
         flush = 1;
         enable = 1;
+        valid_in = 1;
 
         pc_in = 32'h00003000;
         pc_plus4_in = 32'h00003004;
@@ -392,34 +386,93 @@ module tb_id_ex_register;
 
         flush = 0;
         enable = 1;
+        valid_in = 1;
 
         @(posedge clk);
         #1;
 
         check_result({
+            1'b1,
             32'h00003000,
             32'h00003004,
             32'h00000011,
             32'h00000022,
             32'h00000040,
-
             5'd1, 5'd2, 5'd3,
-
-            2'b01,
-            1'b1,
-
+            2'b01, 1'b1,
             1'b0, 1'b0,
-
             4'b0010,
-
             1'b1, 1'b1,
-
-            1'b1,
-            2'b01,
-
+            1'b1, 2'b01,
             1'b1, 1'b1, 1'b1,
             3'b100
-        }, "Capture after flush");
+        }, "Capture valid instruction after flush");
+
+        // Test 7: Explicit invalid NOP transfer
+        @(negedge clk);
+
+        valid_in = 0;
+        pc_in = 32'h00004000;
+        pc_plus4_in = 32'h00004004;
+
+        @(posedge clk);
+        #1;
+
+        check_result({
+            1'b0,
+            32'h00004000,
+            32'h00004004,
+            32'h00000011,
+            32'h00000022,
+            32'h00000040,
+            5'd1, 5'd2, 5'd3,
+            2'b01, 1'b1,
+            1'b0, 1'b0,
+            4'b0010,
+            1'b1, 1'b1,
+            1'b1, 2'b01,
+            1'b1, 1'b1, 1'b1,
+            3'b100
+        }, "Invalid instruction is identified");
+
+        // Test 8: Reset priority over flush
+        @(negedge clk);
+
+        reset = 1;
+        flush = 1;
+
+        @(posedge clk);
+        #1;
+
+        check_result(ZERO_OUTPUT, "Reset priority over flush");
+
+        // Test 9: Normal operation after reset
+        @(negedge clk);
+
+        reset = 0;
+        flush = 0;
+        enable = 1;
+        valid_in = 1;
+
+        @(posedge clk);
+        #1;
+
+        check_result({
+            1'b1,
+            32'h00004000,
+            32'h00004004,
+            32'h00000011,
+            32'h00000022,
+            32'h00000040,
+            5'd1, 5'd2, 5'd3,
+            2'b01, 1'b1,
+            1'b0, 1'b0,
+            4'b0010,
+            1'b1, 1'b1,
+            1'b1, 2'b01,
+            1'b1, 1'b1, 1'b1,
+            3'b100
+        }, "Normal operation after reset");
 
         $display("-------------------------------------");
         $display("ID/EX REGISTER TESTING COMPLETED");

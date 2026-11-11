@@ -17,9 +17,13 @@ module tb_rv32i_integration;
     integer redirect_count = 0;
     integer i;
 
+    real measured_cpi;
+
     reg [31:0] observed [0:31];
 
-    rv32i_top dut (
+    rv32i_top #(
+        .PROGRAM_WORDS(23)
+    ) dut (
         .clk(clk),
         .reset(reset),
         .pc_out(pc_out),
@@ -341,6 +345,51 @@ module tb_rv32i_integration;
 
         if (redirect_count != 3) begin
             $display("FAIL: Expected 3 redirects");
+            errors = errors + 1;
+        end
+
+        // ======================================
+        // PERFORMANCE COUNTER VERIFICATION
+        // ======================================
+
+        $display("");
+        $display("======================================");
+        $display(" PERFORMANCE COUNTER VERIFICATION");
+        $display("======================================");
+
+        $display("Cycle count    : %0d", dut.cycle_count);
+        $display("Retired count  : %0d", dut.retired_count);
+        $display("Stall count    : %0d", dut.stall_count);
+        $display("Redirect count : %0d", dut.redirect_count);
+
+        if (dut.cycle_count != 45) begin
+            $display("FAIL: Expected 45 cycles");
+            errors = errors + 1;
+        end
+
+        if (dut.retired_count != 19) begin
+            $display("FAIL: Expected 19 retired instructions");
+            errors = errors + 1;
+        end
+
+        if (dut.stall_count != 1) begin
+            $display("FAIL: Expected 1 performance stall");
+            errors = errors + 1;
+        end
+
+        if (dut.redirect_count != 3) begin
+            $display("FAIL: Expected 3 performance redirects");
+            errors = errors + 1;
+        end
+
+        if (dut.retired_count != 0) begin
+            measured_cpi = $itor(dut.cycle_count) /
+                           $itor(dut.retired_count);
+
+            $display("Measured CPI   : %0.4f", measured_cpi);
+        end
+        else begin
+            $display("CPI unavailable: no instructions retired");
             errors = errors + 1;
         end
 

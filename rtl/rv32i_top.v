@@ -1,5 +1,7 @@
 
-module rv32i_top (
+module rv32i_top #(
+    parameter PROGRAM_WORDS = 256
+) (
     input  wire        clk,
     input  wire        reset,
 
@@ -26,6 +28,11 @@ module rv32i_top (
 
     wire redirect;
 
+    // Instructions outside the configured program are invalid.
+    wire fetch_valid;
+
+    assign fetch_valid = (pc < (PROGRAM_WORDS * 4));
+
     assign pc_plus4_if = pc + 32'd4;
     assign pc_out = pc;
 
@@ -47,20 +54,25 @@ module rv32i_top (
     wire [31:0] if_id_pc;
     wire [31:0] if_id_pc_plus4;
     wire [31:0] if_id_instruction;
+    wire if_id_valid;
 
     if_id_register IF_ID (
         .clk(clk),
         .reset(reset),
         .enable(if_id_write),
         .flush(redirect),
+
+        .valid_in(fetch_valid),
+        .valid_out(if_id_valid),
+
         .pc_in(pc),
         .pc_plus4_in(pc_plus4_if),
         .instruction_in(instruction_if),
+
         .pc_out(if_id_pc),
         .pc_plus4_out(if_id_pc_plus4),
         .instruction_out(if_id_instruction)
     );
-
 
     // ============================================================
     // ID STAGE - INSTRUCTION DECODE
@@ -188,7 +200,6 @@ module rv32i_top (
         .alu_control(id_alu_control)
     );
 
-
     // ============================================================
     // LOAD-USE HAZARD DETECTION
     // ============================================================
@@ -223,8 +234,10 @@ module rv32i_top (
 
     wire [2:0] id_ex_funct3;
 
+    wire id_ex_valid;
+
     hazard_detection_unit HAZARD_UNIT (
-        .id_ex_mem_read(id_ex_mem_read),
+        .id_ex_mem_read(id_ex_mem_read && id_ex_valid),
         .id_ex_rd(id_ex_rd),
         .if_id_rs1(id_rs1),
         .if_id_rs2(id_rs2),
@@ -235,7 +248,6 @@ module rv32i_top (
         .id_ex_flush(hazard_id_ex_flush)
     );
 
-
     // ============================================================
     // ID/EX PIPELINE REGISTER
     // ============================================================
@@ -245,6 +257,9 @@ module rv32i_top (
         .reset(reset),
         .enable(1'b1),
         .flush(hazard_id_ex_flush | redirect),
+
+        .valid_in(if_id_valid && id_instruction_valid),
+        .valid_out(id_ex_valid),
 
         .pc_in(if_id_pc),
         .pc_plus4_in(if_id_pc_plus4),
@@ -305,7 +320,6 @@ module rv32i_top (
         .funct3_out(id_ex_funct3)
     );
 
-
     // ============================================================
     // EX STAGE - FORWARDING
     // ============================================================
@@ -325,6 +339,7 @@ module rv32i_top (
 
     wire ex_mem_reg_write;
     wire [1:0] ex_mem_wb_sel;
+    wire ex_mem_valid;
 
     // MEM/WB pipeline signals
 
@@ -336,6 +351,7 @@ module rv32i_top (
 
     wire mem_wb_reg_write;
     wire [1:0] mem_wb_wb_sel;
+    wire mem_wb_valid;
 
     // Forwarding control
 
@@ -347,11 +363,11 @@ module rv32i_top (
         .id_ex_rs2(id_ex_rs2),
 
         .ex_mem_rd(ex_mem_rd),
-        .ex_mem_reg_write(ex_mem_reg_write),
+        .ex_mem_reg_write(ex_mem_reg_write && ex_mem_valid),
         .ex_mem_mem_read(ex_mem_mem_read),
 
         .mem_wb_rd(mem_wb_rd),
-        .mem_wb_reg_write(mem_wb_reg_write),
+        .mem_wb_reg_write(mem_wb_reg_write && mem_wb_valid),
 
         .forward_a(forward_a),
         .forward_b(forward_b)
@@ -363,7 +379,6 @@ module rv32i_top (
 
     always @(*) begin
         case (mem_wb_wb_sel)
-
             2'b00:
                 writeback_data_mux = mem_wb_alu_result;
 
@@ -375,7 +390,6 @@ module rv32i_top (
 
             default:
                 writeback_data_mux = 32'b0;
-
         endcase
     end
 
@@ -395,9 +409,7 @@ module rv32i_top (
     reg [31:0] forwarded_rs2;
 
     always @(*) begin
-
         case (forward_a)
-
             2'b00:
                 forwarded_rs1 = id_ex_rs1_data;
 
@@ -409,11 +421,9 @@ module rv32i_top (
 
             default:
                 forwarded_rs1 = id_ex_rs1_data;
-
         endcase
 
         case (forward_b)
-
             2'b00:
                 forwarded_rs2 = id_ex_rs2_data;
 
@@ -425,9 +435,7 @@ module rv32i_top (
 
             default:
                 forwarded_rs2 = id_ex_rs2_data;
-
         endcase
-
     end
 
     // ALU operand selection
@@ -436,9 +444,7 @@ module rv32i_top (
     wire [31:0] alu_operand_b;
 
     always @(*) begin
-
         case (id_ex_alu_a_sel)
-
             2'b00:
                 alu_operand_a = forwarded_rs1;
 
@@ -450,9 +456,7 @@ module rv32i_top (
 
             default:
                 alu_operand_a = forwarded_rs1;
-
         endcase
-
     end
 
     assign alu_operand_b =
@@ -473,26 +477,31 @@ module rv32i_top (
         .zero(alu_zero)
     );
 
-
     // ============================================================
     // EX STAGE - BRANCH AND JUMP CONTROL
     // ============================================================
 
     wire branch_taken;
 
+    wire ex_branch_enable;
+    wire ex_jump_enable;
+
+    assign ex_branch_enable = id_ex_branch && id_ex_valid;
+    assign ex_jump_enable = id_ex_jump && id_ex_valid;
+
     branch_decision_unit BRANCH_UNIT (
-        .branch_enable(id_ex_branch),
+        .branch_enable(ex_branch_enable),
         .funct3(id_ex_funct3),
         .rs1_data(forwarded_rs1),
         .rs2_data(forwarded_rs2),
         .branch_taken(branch_taken)
     );
 
-    // Redirect when a branch is taken or a jump is executed.
+    // Redirect only for a valid instruction.
 
     assign redirect =
-        (id_ex_branch && branch_taken) ||
-        id_ex_jump;
+        (ex_branch_enable && branch_taken) ||
+        ex_jump_enable;
 
     // Next PC selection
 
@@ -504,21 +513,16 @@ module rv32i_top (
         .jal_imm(id_ex_immediate),
         .jalr_imm(id_ex_immediate),
         .rs1_data(forwarded_rs1),
-        .branch_enable(id_ex_branch),
+        .branch_enable(ex_branch_enable),
         .branch_taken(branch_taken),
-        .jump(id_ex_jump),
-        .jalr(id_ex_jalr),
+        .jump(ex_jump_enable),
+        .jalr(id_ex_jalr && id_ex_valid),
         .next_pc(redirect_target)
     );
-
-    // IMPORTANT:
-    // Normal sequential execution advances from the current
-    // Fetch-stage PC. Branches and jumps use the EX-stage target.
 
     assign next_pc = redirect
                    ? redirect_target
                    : pc_plus4_if;
-
 
     // ============================================================
     // EX/MEM PIPELINE REGISTER
@@ -529,6 +533,9 @@ module rv32i_top (
         .reset(reset),
         .enable(1'b1),
         .flush(1'b0),
+
+        .valid_in(id_ex_valid),
+        .valid_out(ex_mem_valid),
 
         .pc_plus4_in(id_ex_pc_plus4),
         .alu_result_in(alu_result),
@@ -559,7 +566,6 @@ module rv32i_top (
         .wb_sel_out(ex_mem_wb_sel)
     );
 
-
     // ============================================================
     // MEM STAGE - DATA MEMORY
     // ============================================================
@@ -568,14 +574,13 @@ module rv32i_top (
 
     data_memory DMEM (
         .clk(clk),
-        .mem_read(ex_mem_mem_read),
-        .mem_write(ex_mem_mem_write),
+        .mem_read(ex_mem_mem_read && ex_mem_valid),
+        .mem_write(ex_mem_mem_write && ex_mem_valid),
         .funct3(ex_mem_funct3),
         .address(ex_mem_alu_result),
         .write_data(ex_mem_rs2_data),
         .read_data(mem_read_data)
     );
-
 
     // ============================================================
     // MEM/WB PIPELINE REGISTER
@@ -586,6 +591,9 @@ module rv32i_top (
         .reset(reset),
         .enable(1'b1),
         .flush(1'b0),
+
+        .valid_in(ex_mem_valid),
+        .valid_out(mem_wb_valid),
 
         .pc_plus4_in(ex_mem_pc_plus4),
         .alu_result_in(ex_mem_alu_result),
@@ -604,16 +612,39 @@ module rv32i_top (
         .wb_sel_out(mem_wb_wb_sel)
     );
 
-
     // ============================================================
     // WB STAGE - REGISTER WRITEBACK
     // ============================================================
 
     assign wb_reg_write =
-        mem_wb_reg_write && (mem_wb_rd != 5'd0);
+        mem_wb_valid &&
+        mem_wb_reg_write &&
+        (mem_wb_rd != 5'd0);
 
     assign wb_rd = mem_wb_rd;
-
     assign wb_data = writeback_data_mux;
+
+    // ============================================================
+    // PERFORMANCE MONITOR
+    // ============================================================
+
+    wire [31:0] cycle_count;
+    wire [31:0] retired_count;
+    wire [31:0] stall_count;
+    wire [31:0] redirect_count;
+
+    performance_monitor PERF_MONITOR (
+        .clk(clk),
+        .reset(reset),
+
+        .retire_valid(mem_wb_valid),
+        .stall_event(hazard_id_ex_flush),
+        .redirect_event(redirect),
+
+        .cycle_count(cycle_count),
+        .retired_count(retired_count),
+        .stall_count(stall_count),
+        .redirect_count(redirect_count)
+    );
 
 endmodule
