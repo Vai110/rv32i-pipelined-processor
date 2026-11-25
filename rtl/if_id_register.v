@@ -8,6 +8,10 @@ module if_id_register (
 
     input wire valid_in,
 
+    // Branch prediction metadata
+    input wire predicted_taken_in,
+    output reg predicted_taken_out,
+
     input wire [31:0] pc_in,
     input wire [31:0] pc_plus4_in,
     input wire [31:0] instruction_in,
@@ -26,6 +30,7 @@ module if_id_register (
         if (reset) begin
 
             valid_out <= 1'b0;
+            predicted_taken_out <= 1'b0;
 
             pc_out <= 32'b0;
             pc_plus4_out <= 32'b0;
@@ -37,6 +42,7 @@ module if_id_register (
         else if (flush) begin
 
             valid_out <= 1'b0;
+            predicted_taken_out <= 1'b0;
 
             pc_out <= 32'b0;
             pc_plus4_out <= 32'b0;
@@ -44,10 +50,11 @@ module if_id_register (
 
         end
 
-        // Capture a new instruction and its validity.
+        // Capture a new instruction and its metadata.
         else if (enable) begin
 
             valid_out <= valid_in;
+            predicted_taken_out <= predicted_taken_in;
 
             pc_out <= pc_in;
             pc_plus4_out <= pc_plus4_in;

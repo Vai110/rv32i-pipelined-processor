@@ -1,4 +1,3 @@
-
 module rv32i_top #(
     parameter PROGRAM_WORDS = 256
 ) (
@@ -25,21 +24,26 @@ module rv32i_top #(
     wire pc_write;
     wire if_id_write;
     wire hazard_id_ex_flush;
-
     wire redirect;
 
-    // Instructions outside the configured program are invalid.
-    wire fetch_valid;
+    // Branch predictor signals
+    wire predict_taken_if;
+    wire predicted_taken_if;
+    wire if_id_predicted_taken;
+    wire id_ex_predicted_taken;
 
-    assign fetch_valid = (pc < (PROGRAM_WORDS * 4));
+    wire branch_misprediction;
 
-    assign pc_plus4_if = pc + 32'd4;
-    assign pc_out = pc;
+    wire predictor_update_en;
+    wire predictor_actual_taken;
+
+    // Declare EX-stage branch PC early for predictor wiring
+    wire [31:0] id_ex_pc;
 
     program_counter PC (
         .clk(clk),
         .reset(reset),
-        .enable(pc_write),
+        .enable(pc_write || redirect),
         .next_pc(next_pc),
         .pc(pc)
     );
@@ -49,7 +53,51 @@ module rv32i_top #(
         .instruction(instruction_if)
     );
 
-    // IF/ID pipeline register
+    // Fetch-stage branch prediction steering
+    wire fetch_is_branch;
+    wire [31:0] fetch_branch_imm;
+    wire [31:0] predicted_branch_target;
+    wire fetch_valid;
+
+   assign fetch_valid = (pc[31:2] < PROGRAM_WORDS);
+    assign pc_plus4_if = pc + 32'd4;
+    assign pc_out = pc;
+    assign predicted_taken_if = predict_taken_if;
+
+    assign fetch_is_branch =
+        (instruction_if[6:0] == 7'b1100011);
+
+    assign fetch_branch_imm = {
+        {19{instruction_if[31]}},
+        instruction_if[31],
+        instruction_if[7],
+        instruction_if[30:25],
+        instruction_if[11:8],
+        1'b0
+    };
+
+    assign predicted_branch_target =
+        pc + fetch_branch_imm;
+
+    // ============================================================
+    // DYNAMIC BRANCH PREDICTOR
+    // ============================================================
+
+    branch_predictor BRANCH_PREDICTOR (
+        .clk(clk),
+        .reset(reset),
+
+        .query_pc(pc),
+        .predict_taken(predict_taken_if),
+
+        .update_en(predictor_update_en),
+        .update_pc(id_ex_pc),
+        .actual_taken(predictor_actual_taken)
+    );
+
+    // ============================================================
+    // IF/ID PIPELINE REGISTER
+    // ============================================================
 
     wire [31:0] if_id_pc;
     wire [31:0] if_id_pc_plus4;
@@ -71,7 +119,10 @@ module rv32i_top #(
 
         .pc_out(if_id_pc),
         .pc_plus4_out(if_id_pc_plus4),
-        .instruction_out(if_id_instruction)
+        .instruction_out(if_id_instruction),
+
+        .predicted_taken_in(predicted_taken_if),
+        .predicted_taken_out(if_id_predicted_taken)
     );
 
     // ============================================================
@@ -100,12 +151,14 @@ module rv32i_top #(
 
     instruction_decoder DECODER (
         .instruction(if_id_instruction),
+
         .opcode(id_opcode),
         .rd(id_rd),
         .funct3(id_funct3),
         .rs1(id_rs1),
         .rs2(id_rs2),
         .funct7(id_funct7),
+
         .is_r_type(id_is_r_type),
         .is_i_type(id_is_i_type),
         .is_load(id_is_load),
@@ -115,6 +168,7 @@ module rv32i_top #(
         .is_jalr(id_is_jalr),
         .is_lui(id_is_lui),
         .is_auipc(id_is_auipc),
+
         .illegal_instruction(id_illegal_instruction),
         .instruction_valid(id_instruction_valid)
     );
@@ -149,6 +203,7 @@ module rv32i_top #(
 
     control_unit CONTROL (
         .instruction_valid(id_instruction_valid),
+
         .is_r_type(id_is_r_type),
         .is_i_type(id_is_i_type),
         .is_load(id_is_load),
@@ -158,16 +213,20 @@ module rv32i_top #(
         .is_jalr(id_is_jalr),
         .is_lui(id_is_lui),
         .is_auipc(id_is_auipc),
+
         .reg_write(id_reg_write),
         .mem_read(id_mem_read),
         .mem_write(id_mem_write),
         .alu_src(id_alu_src),
         .alu_a_sel(id_alu_a_sel),
+
         .branch(id_branch),
         .jump(id_jump),
         .jalr(id_jalr),
+
         .alu_op(id_alu_op),
         .wb_sel(id_wb_sel),
+
         .uses_rs1(id_uses_rs1),
         .uses_rs2(id_uses_rs2)
     );
@@ -179,10 +238,13 @@ module rv32i_top #(
 
     register_file REG_FILE (
         .clk(clk),
+
         .read_addr1(id_rs1),
         .read_data1(id_rs1_data),
+
         .read_addr2(id_rs2),
         .read_data2(id_rs2_data),
+
         .write_enable(wb_reg_write),
         .write_addr(wb_rd),
         .write_data(wb_data)
@@ -199,12 +261,10 @@ module rv32i_top #(
         .is_r_type(id_is_r_type),
         .alu_control(id_alu_control)
     );
-
-    // ============================================================
+        // ============================================================
     // LOAD-USE HAZARD DETECTION
     // ============================================================
 
-    wire [31:0] id_ex_pc;
     wire [31:0] id_ex_pc_plus4;
     wire [31:0] id_ex_rs1_data;
     wire [31:0] id_ex_rs2_data;
@@ -239,10 +299,13 @@ module rv32i_top #(
     hazard_detection_unit HAZARD_UNIT (
         .id_ex_mem_read(id_ex_mem_read && id_ex_valid),
         .id_ex_rd(id_ex_rd),
+
         .if_id_rs1(id_rs1),
         .if_id_rs2(id_rs2),
+
         .if_id_uses_rs1(id_uses_rs1),
         .if_id_uses_rs2(id_uses_rs2),
+
         .pc_write(pc_write),
         .if_id_write(if_id_write),
         .id_ex_flush(hazard_id_ex_flush)
@@ -317,7 +380,10 @@ module rv32i_top #(
         .branch_out(id_ex_branch),
         .jump_out(id_ex_jump),
         .jalr_out(id_ex_jalr),
-        .funct3_out(id_ex_funct3)
+        .funct3_out(id_ex_funct3),
+
+        .predicted_taken_in(if_id_predicted_taken),
+        .predicted_taken_out(id_ex_predicted_taken)
     );
 
     // ============================================================
@@ -379,6 +445,7 @@ module rv32i_top #(
 
     always @(*) begin
         case (mem_wb_wb_sel)
+
             2'b00:
                 writeback_data_mux = mem_wb_alu_result;
 
@@ -390,6 +457,7 @@ module rv32i_top #(
 
             default:
                 writeback_data_mux = 32'b0;
+
         endcase
     end
 
@@ -409,7 +477,9 @@ module rv32i_top #(
     reg [31:0] forwarded_rs2;
 
     always @(*) begin
+
         case (forward_a)
+
             2'b00:
                 forwarded_rs1 = id_ex_rs1_data;
 
@@ -421,9 +491,11 @@ module rv32i_top #(
 
             default:
                 forwarded_rs1 = id_ex_rs1_data;
+
         endcase
 
         case (forward_b)
+
             2'b00:
                 forwarded_rs2 = id_ex_rs2_data;
 
@@ -435,7 +507,9 @@ module rv32i_top #(
 
             default:
                 forwarded_rs2 = id_ex_rs2_data;
+
         endcase
+
     end
 
     // ALU operand selection
@@ -444,7 +518,9 @@ module rv32i_top #(
     wire [31:0] alu_operand_b;
 
     always @(*) begin
+
         case (id_ex_alu_a_sel)
+
             2'b00:
                 alu_operand_a = forwarded_rs1;
 
@@ -456,7 +532,9 @@ module rv32i_top #(
 
             default:
                 alu_operand_a = forwarded_rs1;
+
         endcase
+
     end
 
     assign alu_operand_b =
@@ -476,8 +554,7 @@ module rv32i_top #(
         .result(alu_result),
         .zero(alu_zero)
     );
-
-    // ============================================================
+        // ============================================================
     // EX STAGE - BRANCH AND JUMP CONTROL
     // ============================================================
 
@@ -497,32 +574,60 @@ module rv32i_top #(
         .branch_taken(branch_taken)
     );
 
-    // Redirect only for a valid instruction.
+    // Resolve conditional branches against the prediction
+    // carried through the pipeline.
 
-    assign redirect =
-        (ex_branch_enable && branch_taken) ||
-        ex_jump_enable;
+    assign branch_misprediction =
+        ex_branch_enable &&
+        (branch_taken != id_ex_predicted_taken);
 
-    // Next PC selection
+    assign predictor_update_en = ex_branch_enable;
+    assign predictor_actual_taken = branch_taken;
+
+    // Redirect on a conditional-branch misprediction
+    // or an unconditional jump.
+
+    assign redirect = branch_misprediction || ex_jump_enable;
+
+    // Next PC selection and recovery target.
 
     wire [31:0] redirect_target;
+    wire [31:0] ex_branch_target;
 
     next_pc_logic NEXT_PC (
         .pc(id_ex_pc),
+
         .branch_imm(id_ex_immediate),
         .jal_imm(id_ex_immediate),
         .jalr_imm(id_ex_immediate),
+
         .rs1_data(forwarded_rs1),
+
         .branch_enable(ex_branch_enable),
         .branch_taken(branch_taken),
+
         .jump(ex_jump_enable),
         .jalr(id_ex_jalr && id_ex_valid),
+
         .next_pc(redirect_target)
     );
 
-    assign next_pc = redirect
-                   ? redirect_target
-                   : pc_plus4_if;
+    assign ex_branch_target =
+        branch_taken
+        ? redirect_target
+        : id_ex_pc_plus4;
+
+    // EX recovery takes priority over speculative
+    // fetch-stage prediction.
+
+    assign next_pc =
+        redirect
+        ? (branch_misprediction
+           ? ex_branch_target
+           : redirect_target)
+        : ((fetch_is_branch && predict_taken_if)
+           ? predicted_branch_target
+           : pc_plus4_if);
 
     // ============================================================
     // EX/MEM PIPELINE REGISTER
@@ -574,15 +679,17 @@ module rv32i_top #(
 
     data_memory DMEM (
         .clk(clk),
+
         .mem_read(ex_mem_mem_read && ex_mem_valid),
         .mem_write(ex_mem_mem_write && ex_mem_valid),
+
         .funct3(ex_mem_funct3),
         .address(ex_mem_alu_result),
         .write_data(ex_mem_rs2_data),
+
         .read_data(mem_read_data)
     );
-
-    // ============================================================
+        // ============================================================
     // MEM/WB PIPELINE REGISTER
     // ============================================================
 

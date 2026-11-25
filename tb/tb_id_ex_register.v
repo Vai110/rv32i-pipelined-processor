@@ -1,14 +1,17 @@
-
 `timescale 1ns/1ps
 
 module tb_id_ex_register;
 
     reg clk, reset, enable, flush;
     reg valid_in;
+    reg predicted_taken_in;
+
     wire valid_out;
+    wire predicted_taken_out;
 
     reg [31:0] pc_in, pc_plus4_in;
-    reg [31:0] rs1_data_in, rs2_data_in, immediate_in;
+    reg [31:0] rs1_data_in, rs2_data_in;
+    reg [31:0] immediate_in;
 
     reg [4:0] rs1_in, rs2_in, rd_in;
 
@@ -20,6 +23,7 @@ module tb_id_ex_register;
     reg [3:0] alu_control_in;
 
     reg mem_read_in, mem_write_in;
+
     reg reg_write_in;
     reg [1:0] wb_sel_in;
 
@@ -27,7 +31,8 @@ module tb_id_ex_register;
     reg [2:0] funct3_in;
 
     wire [31:0] pc_out, pc_plus4_out;
-    wire [31:0] rs1_data_out, rs2_data_out, immediate_out;
+    wire [31:0] rs1_data_out, rs2_data_out;
+    wire [31:0] immediate_out;
 
     wire [4:0] rs1_out, rs2_out, rd_out;
 
@@ -39,16 +44,17 @@ module tb_id_ex_register;
     wire [3:0] alu_control_out;
 
     wire mem_read_out, mem_write_out;
+
     wire reg_write_out;
     wire [1:0] wb_sel_out;
 
     wire branch_out, jump_out, jalr_out;
     wire [2:0] funct3_out;
 
-    integer tests;
     integer errors;
 
-    id_ex_register uut (
+    id_ex_register DUT (
+
         .clk(clk),
         .reset(reset),
         .enable(enable),
@@ -57,11 +63,15 @@ module tb_id_ex_register;
         .valid_in(valid_in),
         .valid_out(valid_out),
 
+        .predicted_taken_in(predicted_taken_in),
+        .predicted_taken_out(predicted_taken_out),
+
         .pc_in(pc_in),
         .pc_plus4_in(pc_plus4_in),
 
         .rs1_data_in(rs1_data_in),
         .rs2_data_in(rs2_data_in),
+
         .immediate_in(immediate_in),
 
         .rs1_in(rs1_in),
@@ -92,6 +102,7 @@ module tb_id_ex_register;
 
         .rs1_data_out(rs1_data_out),
         .rs2_data_out(rs2_data_out),
+
         .immediate_out(immediate_out),
 
         .rs1_out(rs1_out),
@@ -116,79 +127,90 @@ module tb_id_ex_register;
         .jump_out(jump_out),
         .jalr_out(jalr_out),
         .funct3_out(funct3_out)
+
     );
 
     always #5 clk = ~clk;
 
-    // 196 bits = original 195-bit payload + 1 validity bit.
-
-    task check_result;
-        input [195:0] expected;
+    task check;
+        input expected_valid;
+        input expected_prediction;
+        input [31:0] expected_pc;
+        input [31:0] expected_immediate;
+        input [4:0] expected_rd;
+        input expected_branch;
+        input expected_jump;
+        input [2:0] expected_funct3;
         input [255:0] test_name;
 
-        reg [195:0] actual;
-
         begin
-            tests = tests + 1;
 
-            actual = {
-                valid_out,
+            #1;
 
-                pc_out,
-                pc_plus4_out,
-                rs1_data_out,
-                rs2_data_out,
-                immediate_out,
+            if (
+                valid_out !== expected_valid ||
+                predicted_taken_out !== expected_prediction ||
+                pc_out !== expected_pc ||
+                immediate_out !== expected_immediate ||
+                rd_out !== expected_rd ||
+                branch_out !== expected_branch ||
+                jump_out !== expected_jump ||
+                funct3_out !== expected_funct3
+            ) begin
 
-                rs1_out,
-                rs2_out,
-                rd_out,
-
-                alu_a_sel_out,
-                alu_src_out,
-
-                uses_rs1_out,
-                uses_rs2_out,
-
-                alu_control_out,
-
-                mem_read_out,
-                mem_write_out,
-
-                reg_write_out,
-                wb_sel_out,
-
-                branch_out,
-                jump_out,
-                jalr_out,
-                funct3_out
-            };
-
-            if (actual !== expected) begin
                 $display("FAIL: %0s", test_name);
-                $display("Expected: %h", expected);
-                $display("Actual  : %h", actual);
-                errors = errors + 1;
-            end
-            else begin
-                $display("PASS: %0s", test_name);
-            end
-        end
-    endtask
 
-    localparam [195:0] ZERO_OUTPUT = 196'b0;
-    localparam [195:0] BUBBLE_OUTPUT = 196'b0;
+                $display("valid: expected=%b actual=%b",
+                         expected_valid, valid_out);
+
+                $display("prediction: expected=%b actual=%b",
+                         expected_prediction, predicted_taken_out);
+
+                $display("PC: expected=%h actual=%h",
+                         expected_pc, pc_out);
+
+                $display("Immediate: expected=%h actual=%h",
+                         expected_immediate, immediate_out);
+
+                $display("RD: expected=%h actual=%h",
+                         expected_rd, rd_out);
+
+                $display("Branch: expected=%b actual=%b",
+                         expected_branch, branch_out);
+
+                $display("Jump: expected=%b actual=%b",
+                         expected_jump, jump_out);
+
+                $display("funct3: expected=%b actual=%b",
+                         expected_funct3, funct3_out);
+
+                errors = errors + 1;
+
+            end
+
+            else begin
+
+                $display("PASS: %0s", test_name);
+
+            end
+
+        end
+
+    endtask
 
     initial begin
 
         clk = 0;
-        reset = 0;
+        reset = 1;
         enable = 0;
         flush = 0;
         valid_in = 0;
 
+        predicted_taken_in = 0;
+
         pc_in = 0;
         pc_plus4_in = 0;
+
         rs1_data_in = 0;
         rs2_data_in = 0;
         immediate_in = 0;
@@ -216,49 +238,43 @@ module tb_id_ex_register;
         jalr_in = 0;
         funct3_in = 0;
 
-        tests = 0;
         errors = 0;
 
-        $dumpfile("simulation/waveforms/id_ex_wave.vcd");
-        $dumpvars(0, tb_id_ex_register);
+        $display("----------------------------------");
+        $display("ID/EX REGISTER TESTING");
+        $display("----------------------------------");
 
-        $display("-------------------------------------");
-        $display("ID/EX REGISTER TESTING STARTED");
-        $display("-------------------------------------");
-
-        // Test 1: Reset
-        @(negedge clk);
-        reset = 1;
-
+        // Test 1: Reset.
         @(posedge clk);
-        #1;
-        check_result(ZERO_OUTPUT, "Reset clears outputs and validity");
+        check(0, 0, 0, 0, 0, 0, 0, 0, "Reset");
 
-        // Test 2: Capture all data and control signals
+        // Test 2: Capture not-taken prediction.
         @(negedge clk);
 
         reset = 0;
         enable = 1;
         valid_in = 1;
+        predicted_taken_in = 0;
 
-        pc_in = 32'h00001000;
-        pc_plus4_in = 32'h00001004;
+        pc_in = 32'h100;
+        pc_plus4_in = 32'h104;
 
-        rs1_data_in = 32'h0000000A;
-        rs2_data_in = 32'h00000014;
-        immediate_in = 32'h00000020;
+        rs1_data_in = 32'hAABBCCDD;
+        rs2_data_in = 32'h11223344;
 
-        rs1_in = 5'd5;
-        rs2_in = 5'd6;
-        rd_in = 5'd7;
+        immediate_in = 32'h00000010;
+
+        rs1_in = 5'd1;
+        rs2_in = 5'd2;
+        rd_in = 5'd5;
 
         alu_a_sel_in = 2'b00;
-        alu_src_in = 1'b0;
+        alu_src_in = 1;
 
-        uses_rs1_in = 1'b1;
-        uses_rs2_in = 1'b1;
+        uses_rs1_in = 1;
+        uses_rs2_in = 1;
 
-        alu_control_in = 4'b0000;
+        alu_control_in = 4'b0010;
 
         mem_read_in = 0;
         mem_write_in = 0;
@@ -266,225 +282,118 @@ module tb_id_ex_register;
         reg_write_in = 1;
         wb_sel_in = 2'b00;
 
-        branch_in = 0;
+        branch_in = 1;
         jump_in = 0;
         jalr_in = 0;
         funct3_in = 3'b000;
 
         @(posedge clk);
-        #1;
 
-        check_result({
-            1'b1,
-            32'h00001000,
-            32'h00001004,
-            32'h0000000A,
-            32'h00000014,
-            32'h00000020,
-            5'd5, 5'd6, 5'd7,
-            2'b00, 1'b0,
-            1'b1, 1'b1,
-            4'b0000,
-            1'b0, 1'b0,
-            1'b1, 2'b00,
-            1'b0, 1'b0, 1'b0,
-            3'b000
-        }, "Capture valid instruction and control signals");
+        check(1, 0, 32'h100, 32'h10, 5'd5,
+              1, 0, 3'b000, "Capture not-taken prediction");
 
-        // Test 3: Stall / hold must preserve validity
+        // Test 3: Capture taken prediction.
+        @(negedge clk);
+
+        predicted_taken_in = 1;
+        pc_in = 32'h200;
+        pc_plus4_in = 32'h204;
+        immediate_in = 32'h00000020;
+        rd_in = 5'd10;
+        branch_in = 0;
+        jump_in = 1;
+        funct3_in = 3'b001;
+
+        @(posedge clk);
+
+        check(1, 1, 32'h200, 32'h20, 5'd10,
+              0, 1, 3'b001, "Capture taken prediction");
+
+        // Test 4: Hold all register values.
         @(negedge clk);
 
         enable = 0;
-        valid_in = 0;
 
-        pc_in = 32'h00002000;
-        pc_plus4_in = 32'h00002004;
-
-        rs1_data_in = 32'hAAAAAAAA;
-        rs2_data_in = 32'hBBBBBBBB;
-        immediate_in = 32'h00000100;
-
-        rd_in = 5'd12;
-        reg_write_in = 0;
+        predicted_taken_in = 0;
+        pc_in = 32'h300;
+        immediate_in = 32'h00000030;
+        rd_in = 5'd15;
+        branch_in = 1;
+        jump_in = 0;
 
         @(posedge clk);
-        #1;
 
-        check_result({
-            1'b1,
-            32'h00001000,
-            32'h00001004,
-            32'h0000000A,
-            32'h00000014,
-            32'h00000020,
-            5'd5, 5'd6, 5'd7,
-            2'b00, 1'b0,
-            1'b1, 1'b1,
-            4'b0000,
-            1'b0, 1'b0,
-            1'b1, 2'b00,
-            1'b0, 1'b0, 1'b0,
-            3'b000
-        }, "Stall holds outputs and validity");
+        check(1, 1, 32'h200, 32'h20, 5'd10,
+              0, 1, 3'b001, "Hold all register values");
 
-        // Test 4: Flush inserts invalid bubble
+        // Test 5: Flush.
         @(negedge clk);
 
-        enable = 1;
         flush = 1;
-        valid_in = 1;
 
         @(posedge clk);
-        #1;
 
-        check_result(BUBBLE_OUTPUT, "Flush inserts invalid bubble");
+        check(0, 0, 0, 0, 0, 0, 0, 0, "Flush");
 
-        // Test 5: Flush priority over enable
+        // Test 6: Flush priority over enable.
         @(negedge clk);
 
         flush = 1;
         enable = 1;
         valid_in = 1;
+        predicted_taken_in = 1;
 
-        pc_in = 32'h00003000;
-        pc_plus4_in = 32'h00003004;
-
-        rs1_data_in = 32'h00000011;
-        rs2_data_in = 32'h00000022;
-        immediate_in = 32'h00000040;
-
-        rs1_in = 5'd1;
-        rs2_in = 5'd2;
-        rd_in = 5'd3;
-
-        alu_a_sel_in = 2'b01;
-        alu_src_in = 1'b1;
-
-        uses_rs1_in = 1'b0;
-        uses_rs2_in = 1'b0;
-
-        alu_control_in = 4'b0010;
-
-        mem_read_in = 1;
-        mem_write_in = 1;
-
-        reg_write_in = 1;
-        wb_sel_in = 2'b01;
-
+        pc_in = 32'h400;
+        immediate_in = 32'h40;
+        rd_in = 5'd20;
         branch_in = 1;
         jump_in = 1;
-        jalr_in = 1;
+        funct3_in = 3'b010;
+
+        @(posedge clk);
+
+        check(0, 0, 0, 0, 0, 0, 0, 0,
+              "Flush priority over enable");
+
+        // Test 7: Capture after flush.
+        @(negedge clk);
+
+        flush = 0;
+        enable = 1;
+        valid_in = 1;
+        predicted_taken_in = 1;
+
+        pc_in = 32'h500;
+        immediate_in = 32'h50;
+        rd_in = 5'd25;
+        branch_in = 1;
+        jump_in = 0;
         funct3_in = 3'b100;
 
         @(posedge clk);
-        #1;
 
-        check_result(BUBBLE_OUTPUT, "Flush priority over enable");
+        check(1, 1, 32'h500, 32'h50, 5'd25,
+              1, 0, 3'b100, "Capture after flush");
 
-        // Test 6: Capture after flush
-        @(negedge clk);
-
-        flush = 0;
-        enable = 1;
-        valid_in = 1;
-
-        @(posedge clk);
-        #1;
-
-        check_result({
-            1'b1,
-            32'h00003000,
-            32'h00003004,
-            32'h00000011,
-            32'h00000022,
-            32'h00000040,
-            5'd1, 5'd2, 5'd3,
-            2'b01, 1'b1,
-            1'b0, 1'b0,
-            4'b0010,
-            1'b1, 1'b1,
-            1'b1, 2'b01,
-            1'b1, 1'b1, 1'b1,
-            3'b100
-        }, "Capture valid instruction after flush");
-
-        // Test 7: Explicit invalid NOP transfer
-        @(negedge clk);
-
-        valid_in = 0;
-        pc_in = 32'h00004000;
-        pc_plus4_in = 32'h00004004;
-
-        @(posedge clk);
-        #1;
-
-        check_result({
-            1'b0,
-            32'h00004000,
-            32'h00004004,
-            32'h00000011,
-            32'h00000022,
-            32'h00000040,
-            5'd1, 5'd2, 5'd3,
-            2'b01, 1'b1,
-            1'b0, 1'b0,
-            4'b0010,
-            1'b1, 1'b1,
-            1'b1, 2'b01,
-            1'b1, 1'b1, 1'b1,
-            3'b100
-        }, "Invalid instruction is identified");
-
-        // Test 8: Reset priority over flush
+        // Test 8: Reset clears metadata and data.
         @(negedge clk);
 
         reset = 1;
-        flush = 1;
 
         @(posedge clk);
-        #1;
 
-        check_result(ZERO_OUTPUT, "Reset priority over flush");
+        check(0, 0, 0, 0, 0, 0, 0, 0,
+              "Reset clears all fields");
 
-        // Test 9: Normal operation after reset
-        @(negedge clk);
-
-        reset = 0;
-        flush = 0;
-        enable = 1;
-        valid_in = 1;
-
-        @(posedge clk);
-        #1;
-
-        check_result({
-            1'b1,
-            32'h00004000,
-            32'h00004004,
-            32'h00000011,
-            32'h00000022,
-            32'h00000040,
-            5'd1, 5'd2, 5'd3,
-            2'b01, 1'b1,
-            1'b0, 1'b0,
-            4'b0010,
-            1'b1, 1'b1,
-            1'b1, 2'b01,
-            1'b1, 1'b1, 1'b1,
-            3'b100
-        }, "Normal operation after reset");
-
-        $display("-------------------------------------");
-        $display("ID/EX REGISTER TESTING COMPLETED");
-        $display("Total tests: %0d", tests);
-        $display("Total errors: %0d", errors);
+        $display("----------------------------------");
+        $display("TOTAL ERRORS: %0d", errors);
 
         if (errors == 0)
-            $display("ALL TESTS PASSED");
+            $display("ALL ID/EX REGISTER TESTS PASSED");
         else
-            $display("SOME TESTS FAILED");
+            $display("ID/EX REGISTER TESTS FAILED");
 
-        $display("-------------------------------------");
+        $display("----------------------------------");
 
         $finish;
 

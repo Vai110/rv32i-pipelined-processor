@@ -1,4 +1,3 @@
-
 module id_ex_register (
 
     input wire clk,
@@ -9,6 +8,10 @@ module id_ex_register (
     // Instruction validity
     input wire valid_in,
     output reg valid_out,
+
+    // Branch prediction metadata
+    input wire predicted_taken_in,
+    output reg predicted_taken_out,
 
     // Program counter information
     input wire [31:0] pc_in,
@@ -87,6 +90,7 @@ module id_ex_register (
         if (reset) begin
 
             valid_out <= 1'b0;
+            predicted_taken_out <= 1'b0;
 
             pc_out <= 32'b0;
             pc_plus4_out <= 32'b0;
@@ -123,6 +127,7 @@ module id_ex_register (
         else if (flush) begin
 
             valid_out <= 1'b0;
+            predicted_taken_out <= 1'b0;
 
             pc_out <= 32'b0;
             pc_plus4_out <= 32'b0;
@@ -159,6 +164,7 @@ module id_ex_register (
         else if (enable) begin
 
             valid_out <= valid_in;
+            predicted_taken_out <= predicted_taken_in;
 
             pc_out <= pc_in;
             pc_plus4_out <= pc_plus4_in;
